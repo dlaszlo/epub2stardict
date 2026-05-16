@@ -1,0 +1,6 @@
+.idea
+.venv
+.claude
+data
+.env
+*.iml

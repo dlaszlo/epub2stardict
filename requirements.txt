@@ -1,0 +1,12 @@
+ebooklib
+beautifulsoup4
+lxml
+spacy
+# GPU backend for spaCy's thinc layer. CUDA 13 builds match the system
+# driver (CUDA 13.0) and PyTorch's +cu130. Without it, spacy.prefer_gpu()
+# returns False and falls back to CPU.
+cupy-cuda13x
+phunspell
+python-dotenv
+openai
+pyglossary
