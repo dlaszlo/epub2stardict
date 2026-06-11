@@ -1,60 +1,111 @@
 # epub2stardict
 
-Builds a book-specific English-to-Hungarian StarDict dictionary from an EPUB.
-Collects headwords from the text, generates Hungarian glosses and example
-sentences with an LLM, writes the StarDict files with PyGlossary.
+Builds one English-to-Hungarian StarDict dictionary **per EPUB book**.
+Collects the book's headwords, generates Hungarian glosses and example
+sentences with an LLM (using the book as context), writes the StarDict
+files with PyGlossary. The glosses are book-specific on purpose — that is
+what makes these dictionaries better than a generic one while reading that
+book.
 
 ## What this is
 
-- **Input:** an EPUB file (`data/book.epub`) plus a 1-2 sentence book
-  description (`data/book_info.txt`) used as prompt context.
-- **Output:** a StarDict dictionary at `data/eng-hun-dict/eng-hun.{ifo,idx,dict.dz}`.
-- **Intermediate data:** numbered JSONL files under `data/` — one input/output
-  per pipeline step.
+- **Input:** one or more book directories under `data/books/<slug>/`, each
+  containing a `book.epub` and a 1-2 sentence `book_info.txt` used as prompt
+  context. An optional `book_title.txt` (one line) gives the display title;
+  without it the slug is prettified (`asimov_i_robot` → `Asimov I Robot`).
+- **Output:** per book, a StarDict dictionary at
+  `$BOOK_DIR/dict/<slug>-eng-hun.{ifo,idx,dict.dz}` plus a PocketBook SDIC
+  dictionary at `$BOOK_DIR/dict/<slug>-eng-hun.dic` (for the built-in
+  reader; copy it to `system/dictionaries` on the device). The book title
+  goes into the filename and the glossary metadata, so the dictionaries are
+  easy to tell apart on the device.
+- **Intermediate data:** per-book JSONL files under `data/books/<slug>/`.
+  Books never share state; each book's pipeline is fully independent.
 
 ## Pipeline (script numbers = run order)
 
-1. `100_epub_to_text.py` — EPUB → `data/100_book.txt` (ASCII-normalized).
-2. `200_chunk_text.py` — text → `data/200_chunks.jsonl` (one sentence per
-   line, segmented with spaCy).
-3. `300_build_word_context.py` — sentences → `data/300_word_contexts.jsonl`
+Every step is per-book and `BOOK_DIR`-driven. Set `BOOK_DIR` first:
+
+```
+export BOOK_DIR=data/books/asimov_i_robot
+```
+
+1. `100_epub_to_text.py` — `$BOOK_DIR/book.epub` → `$BOOK_DIR/100_book.txt`
+   (ASCII-normalized).
+2. `200_chunk_text.py` — text → `$BOOK_DIR/200_chunks.jsonl` (one sentence
+   per line, segmented with spaCy).
+3. `300_build_word_context.py` — sentences → `$BOOK_DIR/300_word_contexts.jsonl`
    (one row per unique surface word + the sentence IDs it appears in).
    Only `[a-z]{3,}` forms are kept.
-4. `400_extract_word_pos.py` — `data/400_word_pos.jsonl`: one row per
+4. `400_extract_word_pos.py` — `$BOOK_DIR/400_word_pos.jsonl`: one row per
    `(word, lemma, POS)` combination with its context sentence IDs.
    `BAD_POS` tags (`PROPN`, `SYM`, `PUNCT`, `X`, `SPACE`) are dropped.
    Lemmas are sanitized (`robot-` → `robot`, with mid-word junk like
    `phd → ph.d.` discarded); minority POS readings that look like tagger
    noise (e.g. `robot` ADJ × 3 vs NOUN × 320) are filtered.
 5. `500_generate_definitions.py` — calls the LLM. Writes
-   `data/500_word_senses.jsonl` with the Hungarian gloss, Hungarian POS
+   `$BOOK_DIR/500_book_senses.jsonl` with the Hungarian gloss, Hungarian POS
    label, two example sentences, and the active `model` name. Incremental:
-   backs up the previous output to `500_word_senses_prev.jsonl` and reuses
+   backs up the previous output to `500_book_senses_prev.jsonl` and reuses
    any row whose `input_key` (hash of `word|lemma|pos|contexts`) still matches.
-6. `550_word_senses_check.py` — runs phunspell over the Hungarian glosses,
-   writes failing rows to `data/550_word_senses_bad.jsonl`. Diagnostic only;
-   the 600 step doesn't consult it.
-7. `600_create_stardict.py` — turns `data/500_word_senses.jsonl` into a
-   StarDict dictionary via PyGlossary.
+6. `550_word_senses_check.py` — runs phunspell over the Hungarian glosses
+   of the `ok=true` rows, writes failing rows to
+   `$BOOK_DIR/550_word_senses_bad.jsonl`. By default diagnostic only; with
+   `FIX=1` it also removes the failing rows from `500_book_senses.jsonl`,
+   so the next 500 run regenerates exactly those words (the 500 reuse only
+   keeps rows present in its output). Typical QA loop:
+   `550 → FIX=1 550 → 500 → 550` until clean (or the rest is genuinely
+   un-spellcheckable).
 
-Step 100 runs once per book. Steps 200/300/400 are deterministic and cache
-their output on disk. Step 500 reuses good rows by `input_key`, so a re-run
-only hits the API for new or previously failed words.
+7. `600_create_stardict.py` — turns the `ok=true` rows of
+   `$BOOK_DIR/500_book_senses.jsonl` into the book's StarDict dictionary
+   and PocketBook SDIC `.dic` under `$BOOK_DIR/dict/` via PyGlossary. The
+   SDIC format strips literal newlines but renders HTML, so the PocketBook
+   entries use `<br/>` line breaks.
+
+### Adding a new book
+
+```
+mkdir -p data/books/<slug>
+cp newbook.epub data/books/<slug>/book.epub
+echo "1-2 sentence description" > data/books/<slug>/book_info.txt
+echo "Author – Title" > data/books/<slug>/book_title.txt  # optional display title
+BOOK_DIR=data/books/<slug> python 100_epub_to_text.py
+BOOK_DIR=data/books/<slug> python 200_chunk_text.py
+BOOK_DIR=data/books/<slug> python 300_build_word_context.py
+BOOK_DIR=data/books/<slug> python 400_extract_word_pos.py
+BOOK_DIR=data/books/<slug> python 500_generate_definitions.py
+BOOK_DIR=data/books/<slug> FIX=1 python 550_word_senses_check.py  # optional QA: drop bad glosses, then re-run 500
+BOOK_DIR=data/books/<slug> python 600_create_stardict.py
+```
+
+Steps 200/300/400 are deterministic and cache their output on disk per
+book. Step 500 reuses good rows within the same book by `input_key`, so a
+re-run only hits the API for new or previously failed words in that book.
+Step 600 is cheap to re-run; it reads the 500 output as its source of
+truth. Existing books are untouched by all of this — a new book never
+forces work on an old one.
 
 ## Architecture
 
 ```
 epub2stardict/                  # shared library
-  io_jsonl.py                   # JSONL read/write/append
+  io_jsonl.py                   # JSONL read/write/append + atomic write
   text.py                       # word filtering, lemma sanitization, BAD_POS
   llm.py                        # LLMClient + prompt + JSON parser
-100_…py … 600_…py               # numbered pipeline scripts
-data/                           # input + JSONL intermediates + final dictionary
+  paths.py                      # BOOK_DIR resolution
+100_…py … 600_…py               # pipeline scripts, all per-book (BOOK_DIR-driven)
+data/
+  books/<slug>/                 # one directory per book
+    book.epub, book_info.txt    # inputs (+ optional book_title.txt)
+    100_… 200_… … 550_…         # intermediates
+    dict/<slug>-eng-hun.*       # the book's StarDict + PocketBook output
 ```
 
 The numbered scripts are deliberately **utility-style**: each has its own
-`main()`, runs standalone, and reads its config from environment variables.
-Anything shared lives under `epub2stardict/`.
+`main()`, runs standalone, and reads its config from environment variables
+(`BOOK_DIR` for per-book scripts, `.env` for LLM settings). Anything shared
+lives under `epub2stardict/`.
 
 ## LLM provider
 
@@ -77,19 +128,20 @@ models that return empty output otherwise). Transient errors are handled
 by the SDK's built-in retry (`max_retries=5`).
 
 The active model name is written into every record in
-`data/500_word_senses.jsonl`. Step 600 shortens it for the headline
-(strips the `provider/` prefix and a `claude-` family prefix):
+`$BOOK_DIR/500_book_senses.jsonl` — provenance only, step 600 does not
+display it. The headline shows the gloss and the POS label; the book is
+identified by the dictionary itself, not by the entries:
 
 ```
-süt (ige) (gemini-3-flash-preview)
+süt (ige)
 Mom baked bread this morning.
 I want to bake a pie.
 ```
 
-The `input_key` deliberately does **not** include the model name. After a
-model change, already-good rows are still reused (and keep their original
-model label). To regenerate everything against a new model, delete
-`data/500_word_senses.jsonl` before running step 500.
+The 500-step `input_key` deliberately does **not** include the model name.
+After a model change, already-good rows in the same book are still reused
+(and keep their original model label). To regenerate one book against a new
+model, delete its `500_book_senses.jsonl` before re-running step 500.
 
 ## GPU
 
@@ -103,8 +155,10 @@ something else is holding GPU memory, replace `spacy.prefer_gpu()` with
 ## Test runs
 
 `LIMIT_WORDS=50` (env) makes the 400 step take only the first 50 unique
-words from the 300 output. Every downstream script inherits the narrowed
-input via the 400 file. Steps 100/200/300 still run over the whole book.
+words from the 300 output. Every downstream per-book script inherits the
+narrowed input via the 400 file. Steps 100/200/300 still run over the
+whole book. The limit is per-book — set it independently for each book
+you want to truncate.
 
 ## Concurrency
 
@@ -117,12 +171,17 @@ default 8). For local Ollama set `LLM_NUM_WORKERS=1`.
 - **KISS first, DRY second.** Extract a helper only when there is real
   duplication (3+ call sites). One LLM provider, one client class, no
   abstract `Service` base.
-- **YAGNI.** Two providers or multi-source merging — we'll add them when
-  needed. Not now.
+- **YAGNI.** Two providers, a real DB, parallel multi-book runs — we'll
+  add them when needed. Not now.
 - **Env-driven config.** No CLI argparse on the numbered scripts, no
-  `config.py`. `.env` and that's it.
-- **JSONL between every step.** One record per line, easy to `jq`.
+  `config.py`. `.env` + `BOOK_DIR` and that's it.
+- **JSONL between every step.** One record per line, easy to `jq`. Atomic
+  write (`os.replace` over a same-directory tmp) where a crash mid-write
+  would lose expensive data (e.g. the 550 FIX rewrite of the 500 output).
 - **Numbered scripts.** Run order is in the filename; no separate runner.
+- **Books are fully independent.** Everything lives under
+  `data/books/<slug>/` and never touches other books. One book = one
+  pipeline run = one dictionary; reproducible and cheap to redo per book.
 
 ## What NOT to add
 
@@ -133,4 +192,10 @@ default 8). For local Ollama set `LLM_NUM_WORKERS=1`.
 - A custom StarDict writer. PyGlossary handles it.
 - argparse on the numbered scripts. Env variables only.
 - A logging framework. `print(..., flush=True)` is enough.
-- Multi-source merging in step 600. Single source is the only mode.
+- Postgres / SQLite. Per-book JSONL files cover single-user, single-machine,
+  sequential use comfortably.
+- A cumulative merged dictionary across books. We built one (600/650/700
+  with an LLM merge step) and removed it: merging to the "most general
+  sense" erases exactly the book-specific glosses that make this product
+  worth having. One book = one dictionary; pick the dictionary that matches
+  the book on the device.

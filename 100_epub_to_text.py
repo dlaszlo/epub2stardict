@@ -4,8 +4,11 @@ import ebooklib
 from bs4 import BeautifulSoup
 from ebooklib import epub
 
-INPUT_PATH = "data/book.epub"
-OUTPUT_PATH = "data/100_book.txt"
+from epub2stardict.paths import book_dir
+
+BOOK_DIR = book_dir()
+INPUT_PATH = BOOK_DIR / "book.epub"
+OUTPUT_PATH = BOOK_DIR / "100_book.txt"
 
 
 def extract_text(epub_path):
@@ -73,8 +76,7 @@ def main():
 
     log_non_ascii_chars(full_text)
 
-    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
-        f.write(full_text)
+    OUTPUT_PATH.write_text(full_text, encoding="utf-8")
 
 
 if __name__ == "__main__":

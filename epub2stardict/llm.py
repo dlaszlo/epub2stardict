@@ -11,6 +11,7 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from string import Template
 from typing import Optional
@@ -194,18 +195,17 @@ def is_bad_gloss(gloss: str) -> bool:
 # Prompt build
 # ---------------------------------------------------------------------------
 
-_BASE_DIR = Path(__file__).resolve().parent.parent
-_BOOK_INFO_PATH = _BASE_DIR / "data" / "book_info.txt"
-
-
+@lru_cache(maxsize=1)
 def _load_book_info() -> str:
+    """Read book_info.txt from $BOOK_DIR. The per-book 500 sets BOOK_DIR;
+    if missing (e.g. ad-hoc import) we fall back to an empty info block."""
+    book_dir = os.environ.get("BOOK_DIR")
+    if not book_dir:
+        return ""
     try:
-        return _BOOK_INFO_PATH.read_text(encoding="utf-8").strip()
+        return (Path(book_dir) / "book_info.txt").read_text(encoding="utf-8").strip()
     except FileNotFoundError:
         return ""
-
-
-_BOOK_INFO = _load_book_info()
 
 
 def _build_entries_block(items: list[GlossInput]) -> str:
@@ -224,7 +224,7 @@ def _build_entries_block(items: list[GlossInput]) -> str:
 
 def build_prompt(items: list[GlossInput]) -> str:
     return PROMPT_TEMPLATE.substitute(
-        book_info=_BOOK_INFO,
+        book_info=_load_book_info(),
         entries_block=_build_entries_block(items),
     )
 

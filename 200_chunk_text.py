@@ -3,9 +3,11 @@ import re
 import spacy
 
 from epub2stardict.io_jsonl import write_jsonl
+from epub2stardict.paths import book_dir
 
-INPUT_PATH = "data/100_book.txt"
-OUTPUT_PATH = "data/200_chunks.jsonl"
+BOOK_DIR = book_dir()
+INPUT_PATH = BOOK_DIR / "100_book.txt"
+OUTPUT_PATH = BOOK_DIR / "200_chunks.jsonl"
 
 # Note: step 200 processes the whole book in a single NLP(text) call,
 # peak ~4-5 GiB VRAM. Fits an 8GB GPU, but only if no other process

@@ -4,11 +4,13 @@ from collections import defaultdict
 import spacy
 
 from epub2stardict.io_jsonl import read_jsonl, write_jsonl
+from epub2stardict.paths import book_dir
 from epub2stardict.text import BAD_POS, accept_word_form, normalize_for_match, sanitize_lemma
 
-WORD_CONTEXTS_PATH = "data/300_word_contexts.jsonl"
-CHUNKS_PATH = "data/200_chunks.jsonl"
-OUTPUT_PATH = "data/400_word_pos.jsonl"
+BOOK_DIR = book_dir()
+WORD_CONTEXTS_PATH = BOOK_DIR / "300_word_contexts.jsonl"
+CHUNKS_PATH = BOOK_DIR / "200_chunks.jsonl"
+OUTPUT_PATH = BOOK_DIR / "400_word_pos.jsonl"
 
 # POS-noise heuristic: if a (word, POS) appears in this many contexts or fewer,
 # and another POS of the same word has at least this many times more — drop the

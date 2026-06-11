@@ -3,10 +3,12 @@ from collections import defaultdict
 import spacy
 
 from epub2stardict.io_jsonl import read_jsonl, write_jsonl
+from epub2stardict.paths import book_dir
 from epub2stardict.text import accept_word_form, normalize_for_match
 
-CHUNKS_PATH = "data/200_chunks.jsonl"
-OUTPUT_PATH = "data/300_word_contexts.jsonl"
+BOOK_DIR = book_dir()
+CHUNKS_PATH = BOOK_DIR / "200_chunks.jsonl"
+OUTPUT_PATH = BOOK_DIR / "300_word_contexts.jsonl"
 
 # GPU needs cupy + an NVIDIA driver. Falls back to CPU on detection failure.
 _GPU = spacy.prefer_gpu()

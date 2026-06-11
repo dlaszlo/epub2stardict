@@ -13,12 +13,14 @@ from openai import APIStatusError
 
 from epub2stardict.io_jsonl import append_jsonl, read_jsonl, write_jsonl
 from epub2stardict.llm import GlossInput, LLMClient
+from epub2stardict.paths import book_dir
 
-CHUNKS_PATH = "data/200_chunks.jsonl"
-WORDS_PATH = "data/400_word_pos.jsonl"
-OUTPUT_PATH = "data/500_word_senses.jsonl"
-PREV_OUTPUT_PATH = "data/500_word_senses_prev.jsonl"
-ERROR_PATH = "data/500_word_senses.errors.jsonl"
+BOOK_DIR = book_dir()
+CHUNKS_PATH = BOOK_DIR / "200_chunks.jsonl"
+WORDS_PATH = BOOK_DIR / "400_word_pos.jsonl"
+OUTPUT_PATH = BOOK_DIR / "500_book_senses.jsonl"
+PREV_OUTPUT_PATH = BOOK_DIR / "500_book_senses_prev.jsonl"
+ERROR_PATH = BOOK_DIR / "500_book_senses.errors.jsonl"
 
 MAX_EXAMPLES_PER_WORD = 2
 BATCH_SIZE = int(os.environ.get("LLM_BATCH_SIZE") or 5)
@@ -205,7 +207,7 @@ def process_batch(
 
 def load_reusable_records(word_recs_by_id: dict[int, dict]) -> dict[int, dict]:
     """Backup OUTPUT_PATH → PREV_OUTPUT_PATH and return the OK records that can be reused."""
-    if not Path(OUTPUT_PATH).exists():
+    if not OUTPUT_PATH.exists():
         print("No previous output found; full run required.")
         return {}
 
@@ -225,7 +227,7 @@ def load_reusable_records(word_recs_by_id: dict[int, dict]) -> dict[int, dict]:
 
 
 def main():
-    os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     chunks = {rec["id"]: rec["sentence"] for rec in read_jsonl(CHUNKS_PATH)}
     print(f"Loaded {len(chunks)} sentences from {CHUNKS_PATH}")
@@ -245,7 +247,7 @@ def main():
     print(f"Words to process this run: {total_to_process}")
 
     write_jsonl(OUTPUT_PATH, reusable.values())
-    Path(ERROR_PATH).write_text("", encoding="utf-8")
+    ERROR_PATH.write_text("", encoding="utf-8")
 
     if total_to_process == 0:
         print("\n========== SUMMARY ==========")
